@@ -23,6 +23,11 @@ jobs:
         with:
           targets: aarch64-apple-ios
 
+      - name: Cargo Binaries global verlinken (für Xcode-Skripte)
+        run: |
+          sudo mkdir -p /usr/local/bin
+          sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/ || true
+
       - name: Abhängigkeiten installieren
         working-directory: ./app
         run: bun install
@@ -61,7 +66,7 @@ jobs:
           SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | grep -A 10 "Schemes:" | tail -n +2 | xargs | awk '{print $1}')
           echo "Verwende Scheme: $SCHEME"
 
-          xcodebuild \
+          PATH="$HOME/.cargo/bin:$PATH" xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
