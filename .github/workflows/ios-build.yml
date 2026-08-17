@@ -3,11 +3,15 @@ name: Build iOS IPA (Tauri v2)
 on:
   push:
     branches: [ main, master ]
-  workflow_dispatch: 
+  workflow_dispatch:
 
 jobs:
   build-ios:
-    runs-on: macos-14 
+    runs-on: macos-14
+
+    defaults:
+      run:
+        working-directory: app
 
     steps:
       - name: Repository auschecken
@@ -17,7 +21,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm' 
+          # Pfad zur package-lock.json im Unterordner angeben:
+          cache: 'bun'
+          cache-dependency-path: 'app/package-lock.json'
 
       - name: Rust Toolchain & iOS Target installieren
         uses: dtolnay/rust-toolchain@stable
@@ -27,7 +33,7 @@ jobs:
       - name: Rust Cache aktivieren
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: app/src-tauri
 
       - name: Dependencies installieren
         run: npm ci
@@ -36,8 +42,7 @@ jobs:
         run: npx tauri ios init
 
       - name: Tauri iOS App bauen
-        run: |
-          npx tauri ios build --no-bundle
+        run: npx tauri ios build --no-bundle
 
       - name: Unsigned IPA paketieren
         run: |
@@ -49,6 +54,6 @@ jobs:
       - name: IPA als GitHub Artifact hochladen
         uses: actions/upload-artifact@v4
         with:
-          name: Rednotes+
-          path: App.ipa
+          name: tauri-app-ios
+          path: app/App.ipa
           retention-days: 7
