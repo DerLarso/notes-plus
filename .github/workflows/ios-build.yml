@@ -48,7 +48,12 @@ jobs:
           sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;/g' src-tauri/gen/apple/*.xcodeproj/project.pbxproj
 
       - name: Tauri iOS App bauen
-        run: bunx tauri ios build -- --no-bundle
+        env:
+          CODE_SIGNING_ALLOWED: "NO"
+          CODE_SIGNING_REQUIRED: "NO"
+          CODE_SIGN_IDENTITY: ""
+        run: |
+          bunx tauri ios build -- --no-bundle CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
       - name: Unsigned IPA paketieren
         run: |
