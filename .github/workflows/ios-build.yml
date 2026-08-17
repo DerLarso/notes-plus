@@ -43,17 +43,20 @@ jobs:
       - name: Tauri iOS Projekt initialisieren
         run: bunx tauri ios init
 
-      - name: Code Signing im Xcode-Projekt deaktivieren
+      - name: Code Signing & Team ID Deaktivieren
         run: |
-          sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO;/g' src-tauri/gen/apple/*.xcodeproj/project.pbxproj
+          PBXPROJ="src-tauri/gen/apple/*.xcodeproj/project.pbxproj"
+          sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' $PBXPROJ
+          sed -i '' 's/CODE_SIGNING_REQUIRED = YES;/CODE_SIGNING_REQUIRED = NO;/g' $PBXPROJ
+          sed -i '' 's/CODE_SIGN_IDENTITY = "iPhone Developer";/CODE_SIGN_IDENTITY = "";/g' $PBXPROJ
 
       - name: Tauri iOS App bauen
-        env:
-          CODE_SIGNING_ALLOWED: "NO"
-          CODE_SIGNING_REQUIRED: "NO"
-          CODE_SIGN_IDENTITY: ""
         run: |
-          bunx tauri ios build -- --no-bundle CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+          bunx tauri ios build -- \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
 
       - name: Unsigned IPA paketieren
         run: |
