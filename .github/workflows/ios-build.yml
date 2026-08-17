@@ -24,9 +24,11 @@ jobs:
           targets: aarch64-apple-ios
 
       - name: Abhängigkeiten installieren
+        working-directory: ./app
         run: bun install
 
       - name: Web Frontend bauen & iOS Projekt initialisieren
+        working-directory: ./app
         run: |
           bun run build
           bunx tauri ios init
@@ -35,7 +37,7 @@ jobs:
         run: |
           python3 -c '
           import glob, re
-          for f in glob.glob("src-tauri/gen/apple/**/*.pbxproj", recursive=True):
+          for f in glob.glob("**/gen/apple/**/*.pbxproj", recursive=True):
               with open(f, "r") as file:
                   content = file.read()
               content = re.sub(r"CODE_SIGN_STYLE = Automatic;", "CODE_SIGN_STYLE = Manual;", content)
@@ -47,18 +49,15 @@ jobs:
 
       - name: iOS App bauen (ohne exportArchive)
         run: |
-          # Workspace automatisch finden
-          WORKSPACE=$(find src-tauri/gen/apple -name "*.xcworkspace" | head -n 1)
+          WORKSPACE=$(find . -name "*.xcworkspace" -not -path "*/build/*" | head -n 1)
           
           if [ -z "$WORKSPACE" ]; then
-            echo "Fehler: Keine .xcworkspace in src-tauri/gen/apple gefunden!"
-            ls -la src-tauri/gen/apple || true
+            echo "Fehler: Keine .xcworkspace gefunden!"
             exit 1
           fi
 
           echo "Gefundener Workspace: $WORKSPACE"
 
-          # Scheme automatisch auslesen
           SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | grep -A 10 "Schemes:" | tail -n +2 | xargs | awk '{print $1}')
           echo "Verwende Scheme: $SCHEME"
 
