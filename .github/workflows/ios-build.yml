@@ -1,4 +1,4 @@
-name: Build iOS IPA (Tauri v2)
+name: Build iOS App
 
 on:
   push:
@@ -7,40 +7,26 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-15
-
-    defaults:
-      run:
-        working-directory: app
+    runs-on: macos-latest
 
     steps:
       - name: Repository auschecken
         uses: actions/checkout@v4
 
-      - name: Node.js einrichten
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Bun einrichten
-        uses: oven-sh/setup-bun@v2
+      - name: Bun installieren
+        uses: oven-sh/setup-bun@v1
         with:
           bun-version: latest
 
-      - name: Rust Toolchain & iOS Target installieren
+      - name: Rust Toolchain & iOS Target einrichten
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
 
-      - name: Rust Cache aktivieren
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: app/src-tauri
+      - name: Abhängigkeiten installieren
+        run: bun install
 
-      - name: Dependencies installieren
-        run: bun install --frozen-lockfile
-
-      - name: Web Frontend bauen & iOS-Projekt initialisieren
+      - name: Web Frontend bauen & iOS Projekt initialisieren
         run: |
           bun run build
           bunx tauri ios init
@@ -59,11 +45,26 @@ jobs:
                   file.write(content)
           '
 
-      - name: iOS App direkt bauen (ohne exportArchive)
+      - name: iOS App bauen (ohne exportArchive)
         run: |
+          # Workspace automatisch finden
+          WORKSPACE=$(find src-tauri/gen/apple -name "*.xcworkspace" | head -n 1)
+          
+          if [ -z "$WORKSPACE" ]; then
+            echo "Fehler: Keine .xcworkspace in src-tauri/gen/apple gefunden!"
+            ls -la src-tauri/gen/apple || true
+            exit 1
+          fi
+
+          echo "Gefundener Workspace: $WORKSPACE"
+
+          # Scheme automatisch auslesen
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | grep -A 10 "Schemes:" | tail -n +2 | xargs | awk '{print $1}')
+          echo "Verwende Scheme: $SCHEME"
+
           xcodebuild \
-            -workspace src-tauri/gen/apple/rednotes-plus.xcworkspace \
-            -scheme rednotes-plus_iOS \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
@@ -75,10 +76,11 @@ jobs:
       - name: Unsigned IPA paketieren
         run: |
           mkdir -p Payload
+          
           APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -type d | head -n 1)
           
           if [ -z "$APP_PATH" ]; then
-            echo "Fehler: Keine .app Datei gefunden!"
+            echo "Fehler: Keine .app Datei im Build-Ordner gefunden!"
             exit 1
           fi
           
