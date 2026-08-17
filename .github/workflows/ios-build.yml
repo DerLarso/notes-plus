@@ -40,9 +40,6 @@ jobs:
       - name: Dependencies installieren
         run: bun install --frozen-lockfile
 
-      - name: Frontend Assets bauen
-        run: bun run build
-
       - name: Tauri iOS Projekt initialisieren
         run: bunx tauri ios init
 
@@ -50,31 +47,26 @@ jobs:
         run: |
           PBXPROJ=$(find src-tauri/gen/apple -name "project.pbxproj")
           
+          # Automatic auf Manual umstellen & Team-ID leeren
           sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' "$PBXPROJ"
           sed -i '' 's/DEVELOPMENT_TEAM = [^;]*;/DEVELOPMENT_TEAM = "";/g' "$PBXPROJ"
+          
+          # Fehlende Schlüssel direkt in alle buildSettings-Blöcke einfügen
           sed -i '' 's/buildSettings = {/buildSettings = {\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tCODE_SIGNING_REQUIRED = NO;\n\t\t\t\tCODE_SIGN_IDENTITY = "";/g' "$PBXPROJ"
 
-      - name: iOS App-Archiv (Release) mit xcodebuild erstellen
+      - name: Tauri iOS App bauen
+        env:
+          CODE_SIGNING_ALLOWED: "NO"
+          CODE_SIGNING_REQUIRED: "NO"
+          CODE_SIGN_IDENTITY: ""
+          DEVELOPMENT_TEAM: ""
         run: |
-          cd src-tauri/gen/apple
-          XCODE_PROJ=$(ls -d *.xcodeproj | head -n 1)
-          SCHEME=$(xcodebuild -list -project "$XCODE_PROJ" | grep -E '_iOS$' | head -n 1 | xargs)
-          
-          xcodebuild archive \
-                    -project "$XCODE_PROJ" \
-                    -scheme "$SCHEME" \
-                    -archivePath build/App.xcarchive \
-                    -sdk iphoneos \
-                    CONFIGURATION=Release \
-                    CODE_SIGNING_ALLOWED=NO \
-                    CODE_SIGNING_REQUIRED=NO \
-                    CODE_SIGN_IDENTITY="" \
-                    DEVELOPMENT_TEAM=""
+          bunx tauri ios build
 
       - name: Unsigned IPA paketieren
         run: |
           mkdir -p Payload
-          cp -r src-tauri/gen/apple/build/App.xcarchive/Products/Applications/*.app Payload/
+          cp -r src-tauri/gen/apple/build/arm64/Release-iphoneos/*.app Payload/
           zip -r App.ipa Payload
           rm -rf Payload
 
