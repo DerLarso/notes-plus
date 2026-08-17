@@ -57,20 +57,28 @@ jobs:
                   file.write(content)
           '
 
-      - name: Tauri iOS App bauen
-        env:
-          CODE_SIGNING_ALLOWED: "NO"
-          CODE_SIGNING_REQUIRED: "NO"
-          CODE_SIGN_IDENTITY: ""
-          DEVELOPMENT_TEAM: ""
+      - name: Web Frontend bauen
         run: |
-          bunx tauri ios build
+          bun run build
+
+      - name: iOS App direkt bauen (ohne exportArchive)
+        run: |
+          xcodebuild \
+            -workspace src-tauri/gen/apple/rednotes-plus.xcworkspace \
+            -scheme rednotes-plus_iOS \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
 
       - name: Unsigned IPA paketieren
         run: |
           mkdir -p Payload
-          # Dynamische Suche nach der .app Datei im DerivedData-Ordner von Xcode
-          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d | grep "release-iphoneos" | head -n 1)
+          # .app aus dem DerivedData-Ordner kopieren
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -type d | head -n 1)
           
           if [ -z "$APP_PATH" ]; then
             echo "Fehler: Keine .app Datei gefunden!"
@@ -85,6 +93,6 @@ jobs:
       - name: IPA als GitHub Artifact hochladen
         uses: actions/upload-artifact@v4
         with:
-          name: tauri-app-ios
-          path: app/App.ipa
+          name: rednotes-plus-ios-unsigned
+          path: App.ipa
           retention-days: 7
