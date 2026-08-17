@@ -54,25 +54,27 @@ jobs:
           sed -i '' 's/DEVELOPMENT_TEAM = [^;]*;/DEVELOPMENT_TEAM = "";/g' "$PBXPROJ"
           sed -i '' 's/buildSettings = {/buildSettings = {\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tCODE_SIGNING_REQUIRED = NO;\n\t\t\t\tCODE_SIGN_IDENTITY = "";/g' "$PBXPROJ"
 
-      - name: iOS App direkt mit xcodebuild kompilieren
+      - name: iOS App-Archiv (Release) mit xcodebuild erstellen
         run: |
           cd src-tauri/gen/apple
           XCODE_PROJ=$(ls -d *.xcodeproj | head -n 1)
           SCHEME=$(xcodebuild -list -project "$XCODE_PROJ" | grep -E '_iOS$' | head -n 1 | xargs)
           
-          xcodebuild -project "$XCODE_PROJ" \
+          xcodebuild archive \
+                    -project "$XCODE_PROJ" \
                     -scheme "$SCHEME" \
-                    -configuration Release \
+                    -archivePath build/App.xcarchive \
                     -sdk iphoneos \
-                    -derivedDataPath build \
+                    CONFIGURATION=Release \
                     CODE_SIGNING_ALLOWED=NO \
                     CODE_SIGNING_REQUIRED=NO \
-                    CODE_SIGN_IDENTITY=""
+                    CODE_SIGN_IDENTITY="" \
+                    DEVELOPMENT_TEAM=""
 
       - name: Unsigned IPA paketieren
         run: |
           mkdir -p Payload
-          cp -r src-tauri/gen/apple/build/Build/Products/Release-iphoneos/*.app Payload/
+          cp -r src-tauri/gen/apple/build/App.xcarchive/Products/Applications/*.app Payload/
           zip -r App.ipa Payload
           rm -rf Payload
 
