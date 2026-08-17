@@ -58,7 +58,7 @@ jobs:
           CODE_SIGN_IDENTITY: ""
           DEVELOPMENT_TEAM: ""
         run: |
-          bunx tauri ios build --no-bundle
+          bunx tauri ios build -- --no-bundle
 
       - name: Unsigned IPA paketieren
         run: |
