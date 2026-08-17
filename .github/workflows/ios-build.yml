@@ -43,16 +43,19 @@ jobs:
       - name: Tauri iOS Projekt initialisieren
         run: bunx tauri ios init
 
-      - name: Code Signing im Xcode-Projekt erzwingend deaktivieren
+      - name: Code Signing im Xcode-Projekt deaktivieren
         run: |
-          PBXPROJ=$(find src-tauri/gen/apple -name "project.pbxproj")
-          
-          # Automatic auf Manual umstellen & Team-ID leeren
-          sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' "$PBXPROJ"
-          sed -i '' 's/DEVELOPMENT_TEAM = [^;]*;/DEVELOPMENT_TEAM = "";/g' "$PBXPROJ"
-          
-          # Fehlende Schlüssel direkt in alle buildSettings-Blöcke einfügen
-          sed -i '' 's/buildSettings = {/buildSettings = {\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tCODE_SIGNING_REQUIRED = NO;\n\t\t\t\tCODE_SIGN_IDENTITY = "";/g' "$PBXPROJ"
+          python3 -c '
+          import glob, re
+          for f in glob.glob("src-tauri/gen/apple/**/*.pbxproj", recursive=True):
+              with open(f, "r") as file:
+                  content = file.read()
+              content = re.sub(r"CODE_SIGN_STYLE = Automatic;", "CODE_SIGN_STYLE = Manual;", content)
+              content = re.sub(r"DEVELOPMENT_TEAM = [^;]*;", "DEVELOPMENT_TEAM = \"\";", content)
+              content = re.sub(r"buildSettings = \{", "buildSettings = {\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tCODE_SIGNING_REQUIRED = NO;\n\t\t\t\tCODE_SIGN_IDENTITY = \"\";", content)
+              with open(f, "w") as file:
+                  file.write(content)
+          '
 
       - name: Tauri iOS App bauen
         env:
@@ -66,7 +69,16 @@ jobs:
       - name: Unsigned IPA paketieren
         run: |
           mkdir -p Payload
-          cp -r src-tauri/gen/apple/build/arm64/Release-iphoneos/*.app Payload/
+          # Dynamische Suche nach der .app Datei im DerivedData-Ordner von Xcode
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d | grep "release-iphoneos" | head -n 1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "Fehler: Keine .app Datei gefunden!"
+            exit 1
+          fi
+          
+          echo "Verwende App unter: $APP_PATH"
+          cp -r "$APP_PATH" Payload/
           zip -r App.ipa Payload
           rm -rf Payload
 
