@@ -1,0 +1,54 @@
+name: Build iOS IPA (Tauri v2)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: 
+
+jobs:
+  build-ios:
+    runs-on: macos-14 
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Node.js einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm' 
+
+      - name: Rust Toolchain & iOS Target installieren
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Rust Cache aktivieren
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Dependencies installieren
+        run: npm ci
+
+      - name: Tauri iOS Projekt initialisieren
+        run: npx tauri ios init
+
+      - name: Tauri iOS App bauen
+        run: |
+          npx tauri ios build --no-bundle
+
+      - name: Unsigned IPA paketieren
+        run: |
+          mkdir -p Payload
+          cp -r src-tauri/gen/apple/build/arm64/Release-iphoneos/*.app Payload/
+          zip -r App.ipa Payload
+          rm -rf Payload
+
+      - name: IPA als GitHub Artifact hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rednotes+
+          path: App.ipa
+          retention-days: 7
