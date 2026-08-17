@@ -44,7 +44,7 @@ jobs:
         run: bunx tauri ios init
 
       - name: Tauri iOS App bauen
-        run: bunx tauri ios build --no-bundle
+        run: bunx tauri ios build -- --no-bundle
 
       - name: Unsigned IPA paketieren
         run: |
