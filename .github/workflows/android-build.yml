@@ -48,6 +48,10 @@ jobs:
         working-directory: app
         run: bun install
 
+      - name: Init Android Project
+        working-directory: app
+        run: bunx tauri android init --ci
+
       - name: Build Android APK
         working-directory: app
         run: bunx tauri android build --apk
