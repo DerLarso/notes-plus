@@ -1,4 +1,5 @@
 name: Build & Sign Android App
+
 on:
   push:
     branches: [ main, master ]
@@ -55,14 +56,24 @@ jobs:
         working-directory: app
         run: bunx tauri android build --apk
 
+      # --- Prüfen, ob Signierungs-Secret existiert ---
+      - name: Check Keystore Secret
+        id: check_keystore
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "is_signed=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_signed=false" >> $GITHUB_OUTPUT
+          fi
+
       # --- APK Signierung ---
       - name: Decode Keystore
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        if: steps.check_keystore.outputs.is_signed == 'true'
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/release.keystore
 
       - name: Sign APK
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        if: steps.check_keystore.outputs.is_signed == 'true'
         run: |
           BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/* | tail -n 1)
           APK_PATH=$(find app/gen/android/app/build/outputs/apk -name "*.apk" | head -n 1)
@@ -77,14 +88,14 @@ jobs:
 
       # --- Artefakt hochladen ---
       - name: Upload Signed APK
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        if: steps.check_keystore.outputs.is_signed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: app-release-signed
           path: app/app-release-signed.apk
 
       - name: Upload Unsigned APK (Fallback)
-        if: ${{ secrets.KEYSTORE_BASE64 == '' }}
+        if: steps.check_keystore.outputs.is_signed == 'false'
         uses: actions/upload-artifact@v4
         with:
           name: app-release-unsigned
