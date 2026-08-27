@@ -1,6 +1,6 @@
 [tools]
-bun = "latest"
-rust = { version = "1.97.0", profile = "default" }
+bun = "1.4.0"
+rust = { version = "1.98.0", profile = "default" }
 
 [env]
 NO_STRIP = "1" #fixes an error when bundling to .appimage
@@ -8,17 +8,30 @@ NO_STRIP = "1" #fixes an error when bundling to .appimage
 [tasks.dev]
 description = "Start RedNotes Plus in dev mode"
 run = "cd app && bun tauri dev"
+alias = "d"
 
 [tasks.build]
 description = "Build RedNotes Plus"
 run = "cd app && bun tauri build"
+alias = "b"
 
 [tasks.check]
+description = "Check Rust code and frontend code for errors"
+alias = "c"
+depends = ["check-rust", "check-frontend"]
+
+[tasks.check-rust]
 description = "Check Rust code using cargo check and cargo clippy"
 depends = ["check-common","check-main"]
+alias = "crs"
 
 [tasks.check-common]
 run = "cd common && cargo check && cargo clippy"
 
 [tasks.check-main]
 run = "cd app && cargo check && cargo clippy"
+
+[tasks.check-frontend]
+description = "Check the frontend for type errors"
+run = "cd app && bun run check"
+alias = "cfr"

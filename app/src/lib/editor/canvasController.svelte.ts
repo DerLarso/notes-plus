@@ -1,9 +1,20 @@
-import { canvasManager } from "$lib/editor/state/canvasManager.svelte";
-import { lassoManager } from "$lib/editor/state/lassoManager.svelte";
+import {
+  canvasManager,
+  type Tool,
+} from "$lib/editor/state/canvasManager.svelte";
 import { contentManager } from "$lib/state/contentManager.svelte";
 import { settingsStore } from "$lib/state/settingsStore.svelte";
+import { tabManager } from "$lib/state/tabManager.svelte";
+import { toolHandlers, type ToolHandlers } from "./handlers";
+import { toolFromButtons } from "./toolFromButtons.svelte";
 
 const ZOOM_STEP = 1.1;
+
+const TOOL_LABELS: Record<Tool, string> = {
+  pen: "Draw",
+  eraser: "Erase",
+  lasso: "Select",
+};
 
 export function canvasController(
   element: HTMLElement,
@@ -13,13 +24,19 @@ export function canvasController(
     updateCursor: (visible: boolean, x?: number, y?: number) => void;
   },
 ) {
-  let pointerType = "mouse";
-  let currentButton = -1;
-  let touchX = 0;
-  let touchY = 0;
-  let initialPinchDistance = 1;
+  let elementRect = element.getBoundingClientRect();
+  let initialPinchDistance: number | undefined;
+  let prevCenter: Record<"x" | "y", number> | undefined;
   let cursorX = 0;
   let cursorY = 0;
+  let activeTool: Tool | undefined = undefined;
+  const activeTouch = new Map<number, { x: number; y: number }>();
+
+  // update elementRect on resize
+  const obs = new ResizeObserver(() => {
+    elementRect = element.getBoundingClientRect();
+  });
+  obs.observe(element);
 
   const isUIEvent = (e: Event) => {
     return (
@@ -36,170 +53,115 @@ export function canvasController(
     return { x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
   }
 
-  const onPointerEnter = (e: PointerEvent) => {
-    cursorX = e.offsetX;
-    cursorY = e.offsetY;
-    updateCursor(true, cursorX, cursorY);
-  };
-
-  const onPointerLeave = () => {
-    updateCursor(false);
-    currentButton = -1;
-
-    if (canvasManager.tool === "lasso") {
-      if (lassoManager.isSelecting) {
-        lassoManager.updateSelection();
-        canvasManager.redrawStrokes();
-
-        if (!lassoManager.selection) {
-          lassoManager.isSelecting = true;
-          lassoManager.points = [];
-        } else {
-          const noSelection = !lassoManager.selectedLayers.some(
-            (l) => lassoManager.selection![l].length > 0,
-          );
-          lassoManager.isSelecting = noSelection;
-          if (noSelection) lassoManager.points = [];
-        }
-      }
-    }
-
-    if (canvasManager.drawing) {
-      canvasManager.drawing = false;
-      canvasManager.finishStroke();
-    }
-  };
-
   const onPointerDown = (e: PointerEvent) => {
     if (isUIEvent(e)) return;
-    pointerType = e.pointerType;
-    currentButton = e.button;
-
-    if (
-      !canvasManager.lockTool &&
-      e.pointerType === "pen" &&
-      !lassoManager.selection
-    ) {
-      switch (e.button) {
-        case 0:
-          canvasManager.tool = "pen";
-          break;
-        case 1:
-        case 2:
-          canvasManager.tool = "lasso";
-          lassoManager.isSelecting = true;
-          canvasManager.redrawStrokes();
-          break;
-        case 5:
-          canvasManager.tool = "eraser";
-          break;
-      }
+    elementRect = element.getBoundingClientRect();
+    if (e.pointerType === "touch") {
+      activeTouch.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      return;
+    } else if (e.pointerType === "pen") {
+      const tool = toolFromButtons(e.buttons);
+      if (tool) canvasManager.tool = tool;
     }
 
-    if (canvasManager.tool === "lasso") {
-      if (!lassoManager.isSelecting) {
-        const cursorRelative = canvasManager.translateToRelative(
-          e.offsetX,
-          e.offsetY,
-        );
-        if (
-          lassoManager.boundingBox &&
-          cursorRelative.x >= lassoManager.boundingBox.x &&
-          cursorRelative.x <=
-            lassoManager.boundingBox.x + lassoManager.boundingBox.width &&
-          cursorRelative.y >= lassoManager.boundingBox.y &&
-          cursorRelative.y <=
-            lassoManager.boundingBox.y + lassoManager.boundingBox.height
-        ) {
-          lassoManager.isDraggingSelection = true;
-          lassoManager.dragStart = cursorRelative;
-          return;
-        } else {
-          lassoManager.reset();
-          canvasManager.redrawStrokes();
-          return;
-        }
-      } else {
-        lassoManager.points = [
-          canvasManager.translateToRelative(e.offsetX, e.offsetY, e.pressure),
-        ];
-        lassoManager.isSelecting = true;
-        canvasManager.redrawStrokes();
-        return;
-      }
-    }
+    element.setPointerCapture(e.pointerId);
 
-    if (
-      e.button === 0 &&
-      pointerType !== "touch" &&
-      canvasManager.tool === "pen"
-    ) {
-      canvasManager.drawing = true;
-      canvasManager.addPoint(e.offsetX, e.offsetY, e.pressure ?? 0.5);
-    } else if (canvasManager.tool === "eraser") {
-      canvasManager.eraser(e.offsetX, e.offsetY);
-    }
+    activeTool = canvasManager.tool;
+
+    tabManager.tab.history.begin(TOOL_LABELS[activeTool]);
+
+    callHandler(activeTool, "down", e);
   };
 
-  const onPointerUp = () => {
-    if (canvasManager.tool === "lasso") {
-      if (lassoManager.isDraggingSelection) {
-        lassoManager.isDraggingSelection = false;
-        lassoManager.updateDrag();
-      } else if (lassoManager.isSelecting) {
-        lassoManager.updateSelection();
-        canvasManager.redrawStrokes();
-        if (!lassoManager.selection) {
-          lassoManager.isSelecting = true;
-          lassoManager.points = [];
-        } else {
-          const noSelection = !lassoManager.selectedLayers.some(
-            (l) => lassoManager.selection![l].length > 0,
-          );
-          lassoManager.isSelecting = noSelection;
-          if (noSelection) lassoManager.points = [];
-        }
-      }
+  const onPointerUp = (e: PointerEvent) => {
+    if (e.pointerType === "touch") {
+      activeTouch.delete(e.pointerId);
+      initialPinchDistance = undefined;
+      return;
     }
 
-    currentButton = -1;
-    canvasManager.drawing = false;
-    canvasManager.finishStroke();
+    const tool = activeTool ?? canvasManager.tool;
+    activeTool = undefined;
+
+    callHandler(tool, "up", e);
+    tabManager.tab.history.commit();
   };
 
   const onPointerMove = (e: PointerEvent) => {
-    if (lassoManager.isDraggingSelection) {
-      lassoManager.dragOffsetX += (e.offsetX - cursorX) / contentManager.zoom;
-      lassoManager.dragOffsetY += (e.offsetY - cursorY) / contentManager.zoom;
+    if (e.pointerType === "touch") {
+      const prev = activeTouch.get(e.pointerId);
+      activeTouch.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (activeTouch.size === 1) {
+        if (!prev) return;
+        const dX = e.clientX - prev.x;
+        const dY = e.clientY - prev.y;
+        contentManager.panX += dX / contentManager.zoom;
+        contentManager.panY += dY / contentManager.zoom;
+        canvasManager.redrawStrokes();
+      } else if (activeTouch.size === 2) {
+        const [t0, t1] = [...activeTouch.values()];
+        const d = getPinchDistance(t0.x, t0.y, t1.x, t1.y) || 1;
+        const c = getCenter(t0.x, t0.y, t1.x, t1.y);
+
+        const center = { x: c.x - elementRect.left, y: c.y - elementRect.top };
+
+        if (initialPinchDistance !== undefined && prevCenter) {
+          canvasManager.zoomAround(
+            center.x,
+            center.y,
+            d / initialPinchDistance,
+          );
+
+          contentManager.panX +=
+            (center.x - prevCenter.x) / contentManager.zoom;
+          contentManager.panY +=
+            (center.y - prevCenter.y) / contentManager.zoom;
+
+          canvasManager.redrawStrokes();
+        }
+
+        initialPinchDistance = d;
+        prevCenter = center;
+      }
+      return;
     }
+
     cursorX = e.offsetX;
     cursorY = e.offsetY;
     updateCursor(true, cursorX, cursorY);
 
-    switch (currentButton) {
-      case 0:
-        if (canvasManager.drawing) {
-          canvasManager.addPoint(e.offsetX, e.offsetY, e.pressure ?? 0.5);
-        } else if (canvasManager.tool === "eraser") {
-          canvasManager.eraser(e.offsetX, e.offsetY);
-        } else if (canvasManager.tool === "lasso") {
-          lassoManager.points.push(
-            canvasManager.translateToRelative(e.offsetX, e.offsetY, e.pressure),
-          );
-        }
-        break;
-      case 5:
-        canvasManager.eraser(e.offsetX, e.offsetY);
-        break;
-      case 2:
-      case 1:
-        if (canvasManager.tool === "lasso") {
-          lassoManager.points.push(
-            canvasManager.translateToRelative(e.offsetX, e.offsetY, e.pressure),
-          );
-        }
-        break;
+    if (toolFromButtons(e.buttons) === undefined) return;
+
+    const tool = activeTool ?? canvasManager.tool;
+
+    if (tool === "pen") {
+      for (const s of e.getCoalescedEvents?.() ?? [e]) {
+        callHandler(tool, "move", s);
+      }
+    } else {
+      callHandler(tool, "move", e);
     }
+  };
+
+  const onPointerEnter = (e: PointerEvent) => {
+    if (e.pointerType === "touch") return;
+
+    elementRect = element.getBoundingClientRect();
+
+    cursorX = e.offsetX;
+    cursorY = e.offsetY;
+    updateCursor(true, cursorX, cursorY);
+  };
+
+  const onPointerLeave = (e: PointerEvent) => {
+    if (e.pointerType === "touch") {
+      activeTouch.delete(e.pointerId);
+      initialPinchDistance = undefined;
+      prevCenter = undefined;
+      return;
+    }
+
+    updateCursor(false);
   };
 
   const onWheel = (e: WheelEvent) => {
@@ -207,7 +169,7 @@ export function canvasController(
 
     if (e.ctrlKey) {
       const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
-      contentManager.zoom *= factor;
+      canvasManager.zoomAround(e.offsetX, e.offsetY, factor);
     } else {
       // Allow the axes to be swapped?
       const a = settingsStore.store.shift_swaps_scroll_axes;
@@ -221,75 +183,43 @@ export function canvasController(
     canvasManager.redrawStrokes();
   };
 
-  const onTouchStart = (e: TouchEvent) => {
-    if (isUIEvent(e)) return;
-    if (pointerType !== "touch") return;
-    if (e.touches.length === 1) {
-      e.preventDefault();
-      touchX = e.touches[0].clientX;
-      touchY = e.touches[0].clientY;
-    } else if (e.touches.length === 2) {
-      initialPinchDistance = getPinchDistance(
-        e.touches[0].clientX,
-        e.touches[0].clientY,
-        e.touches[1].clientX,
-        e.touches[1].clientY,
-      );
-    }
-  };
+  const cleanups: (() => void)[] = [];
 
-  const onTouchMove = (e: TouchEvent) => {
-    if (pointerType !== "touch") return;
-    if (e.touches.length === 1) {
-      const deltaX = e.touches[0].clientX - touchX;
-      const deltaY = e.touches[0].clientY - touchY;
-      contentManager.panX += deltaX / contentManager.zoom;
-      contentManager.panY += deltaY / contentManager.zoom;
-      touchX = e.touches[0].clientX;
-      touchY = e.touches[0].clientY;
-      canvasManager.redrawStrokes();
-    } else if (e.touches.length === 2) {
-      let currentDistance = getPinchDistance(
-        e.touches[0].clientX,
-        e.touches[0].clientY,
-        e.touches[1].clientX,
-        e.touches[1].clientY,
-      );
-      if (currentDistance <= 0) currentDistance = 1;
-      contentManager.zoom *= currentDistance / initialPinchDistance;
-      initialPinchDistance = currentDistance;
-      canvasManager.redrawStrokes();
-    }
-  };
+  on("pointerenter", onPointerEnter);
+  on("pointerleave", onPointerLeave);
+  on("pointerdown", onPointerDown);
+  on("pointermove", onPointerMove);
+  on("pointerup", onPointerUp);
+  on("pointercancel", onPointerUp);
+  on("wheel", onWheel, { passive: false });
 
-  const onTouchEnd = (e: TouchEvent) => {
-    if (e.touches.length === 1) {
-      touchX = e.touches[0].clientX;
-      touchY = e.touches[0].clientY;
-    }
-  };
-
-  element.addEventListener("pointerenter", onPointerEnter);
-  element.addEventListener("pointerleave", onPointerLeave);
-  element.addEventListener("pointerdown", onPointerDown);
-  element.addEventListener("pointermove", onPointerMove);
-  element.addEventListener("pointerup", onPointerUp);
-  element.addEventListener("wheel", onWheel, { passive: false });
-  element.addEventListener("touchstart", onTouchStart, { passive: false });
-  element.addEventListener("touchmove", onTouchMove, { passive: false });
-  element.addEventListener("touchend", onTouchEnd);
+  function on<K extends keyof HTMLElementEventMap>(
+    type: K,
+    handler: (e: HTMLElementEventMap[K]) => void,
+    options?: AddEventListenerOptions,
+  ) {
+    element.addEventListener(type, handler, options);
+    cleanups.push(() => element.removeEventListener(type, handler, options));
+  }
 
   return {
     destroy() {
-      element.removeEventListener("pointerenter", onPointerEnter);
-      element.removeEventListener("pointerleave", onPointerLeave);
-      element.removeEventListener("pointerdown", onPointerDown);
-      element.removeEventListener("pointermove", onPointerMove);
-      element.removeEventListener("pointerup", onPointerUp);
-      element.removeEventListener("wheel", onWheel);
-      element.removeEventListener("touchstart", onTouchStart);
-      element.removeEventListener("touchmove", onTouchMove);
-      element.removeEventListener("touchend", onTouchEnd);
+      cleanups.forEach((c) => c());
+      obs.disconnect();
     },
   };
+
+  function callHandler(
+    tool: Tool,
+    action: keyof ToolHandlers,
+    e: PointerEvent,
+  ) {
+    const point = canvasManager.translateToRelative(
+      e.clientX - elementRect.x,
+      e.clientY - elementRect.y,
+      e.pressure,
+    );
+
+    toolHandlers[tool][action]?.(point, e);
+  }
 }

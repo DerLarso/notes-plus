@@ -1,11 +1,18 @@
 import { contentManager } from "$lib/state/contentManager.svelte";
 import { tabManager } from "$lib/state/tabManager.svelte";
-import type { Block, Point } from "$lib/tauri/bindings";
+import type { Block, Point, Stroke } from "$lib/tauri/bindings";
+import {
+  circleIntersectsBounds,
+  getStrokeBounds,
+  type ContentBounds,
+  type Point2D,
+} from "$lib/util/canvasBounds";
 import { inputToPath } from "../svg";
 import { erase } from "../tools/erase";
 import { lassoManager } from "./lassoManager.svelte";
 
 export type Tool = "eraser" | "pen" | "lasso";
+type CacheEntry = { path?: Path2D; bounds?: ContentBounds | null };
 
 class CanvasManager {
   #tool = $state<Tool>("pen");
@@ -28,9 +35,35 @@ class CanvasManager {
     contentManager.layers[contentManager.activeLayer]?.id,
   );
 
-  addPoint(x: number, y: number, pressure: number) {
-    const p = this.translateToRelative(x, y, pressure);
+  #strokeCache = new Map<string, CacheEntry>();
 
+  #entry(id: string) {
+    let e = this.#strokeCache.get(id);
+    if (!e) this.#strokeCache.set(id, (e = {}));
+    return e;
+  }
+
+  private getPath(s: Stroke) {
+    const e = this.#entry(s.id);
+    return (e.path ??= new Path2D(inputToPath(s.points, s.thickness, false)));
+  }
+
+  private getBounds(s: Stroke) {
+    const e = this.#entry(s.id);
+    if (e.bounds === undefined) e.bounds = getStrokeBounds(s);
+    return e.bounds;
+  }
+
+  cleanCache() {
+    const live = new Set<string>();
+    for (const l of contentManager.layers)
+      for (const b of l.blocks) if (b.Stroke) live.add(b.Stroke.id);
+
+    for (const k of [...this.#strokeCache.keys()])
+      if (!live.has(k)) this.#strokeCache.delete(k);
+  }
+
+  addPoint(p: Point) {
     if (this.points.length === 0) {
       this.points.push(p);
       return;
@@ -88,8 +121,32 @@ class CanvasManager {
     return { x, y, pressure };
   }
 
-  eraser(x: number, y: number) {
-    let changed = false;
+  zoomAround(x: number, y: number, factor: number) {
+    const before = canvasManager.translateToRelative(x, y);
+
+    contentManager.zoom *= factor;
+
+    const z = contentManager.zoom;
+    contentManager.panX = (x - this.width / 2) / z - before.x;
+    contentManager.panY = (y - this.height / 2) / z - before.y;
+  }
+
+  eraseAlong(from: Point2D, to: Point2D) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+
+    const steps = Math.max(
+      1,
+      Math.ceil(Math.hypot(dx, dy) / (this.eraserRadius / 2)),
+    );
+
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      this.eraser({ x: from.x + dx * t, y: from.y + dy * t });
+    }
+  }
+
+  eraser(p: Omit<Point, "pressure">) {
     contentManager.layers.forEach((l, i) => {
       if (l.locked || !l.visible) return;
 
@@ -101,11 +158,11 @@ class CanvasManager {
         const s = b.Stroke;
         if (s.points.length === 0) return []; // empty stroke, skip/delete
 
-        const newPoints = erase(
-          s.points,
-          this.translateToRelative(x, y, 0.5),
-          this.eraserRadius,
-        );
+        const bounds = this.getBounds(s);
+        if (bounds && !circleIntersectsBounds(p, this.eraserRadius, bounds))
+          return b;
+
+        const newPoints = erase(s.points, p, this.eraserRadius);
 
         if (newPoints.length === 1 && newPoints[0].length === s.points.length)
           // newPoints returns one stroke. When the length of the points matches, the points are precisely the same, thus no change has occurred.
@@ -132,12 +189,8 @@ class CanvasManager {
           ...l,
           blocks,
         };
-        changed = true;
       }
     });
-
-    // Something has changed. Mark the tab as edited
-    if (changed) tabManager.setEdited();
   }
 
   finishStroke() {
@@ -154,8 +207,6 @@ class CanvasManager {
         points: this.points,
       },
     });
-
-    tabManager.setEdited();
 
     this.points = [];
   }
@@ -193,6 +244,7 @@ class CanvasManager {
         );
 
       const ctx = canvasManager.layerCtx[l.id];
+      if (!ctx) return;
 
       ctx.resetTransform();
       ctx.scale(this.dpr, this.dpr);
@@ -200,8 +252,8 @@ class CanvasManager {
       ctx.scale(contentManager.zoom, contentManager.zoom);
       ctx.translate(contentManager.panX, contentManager.panY);
 
-      for (const { color, points, thickness } of strokes) {
-        this.drawOnCanvas(inputToPath(points, thickness, false), l.id, color);
+      for (const s of strokes) {
+        this.drawOnCanvas(this.getPath(s), l.id, s.color);
       }
     });
   }
@@ -224,10 +276,16 @@ class CanvasManager {
   }
 
   set tool(tool: Tool) {
-    if (this.#tool === "lasso" && tool !== "lasso") {
-      lassoManager.reset();
-    }
-    this.#tool = tool;
+    if (this.#tool === tool) return;
+
+    tabManager.transact("Switch tool", () => {
+      if (this.#tool === "lasso") lassoManager.reset();
+      else if (tool === "lasso") lassoManager.isSelecting = true;
+
+      this.#tool = tool;
+    });
+
+    this.redrawStrokes();
   }
 
   get thickness() {
