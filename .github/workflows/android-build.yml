@@ -1,5 +1,4 @@
 name: Build & Sign Android App
-
 on:
   push:
     branches: [ main, master ]
