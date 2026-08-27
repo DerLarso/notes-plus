@@ -1,4 +1,4 @@
-name: Build & Sign Android App
+name: Build & Sign Android App (arm64-v8a)
 
 on:
   push:
@@ -34,10 +34,10 @@ jobs:
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.2.9519653"
           echo "NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
 
-      - name: Setup Rust & Android Targets
+      - name: Setup Rust & Android Target (arm64)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
+          targets: aarch64-linux-android
 
       - name: Install Linux Build Dependencies
         run: |
@@ -52,9 +52,9 @@ jobs:
         working-directory: app
         run: bunx tauri android init --ci
 
-      - name: Build Android APK
+      - name: Build Android APK (arm64)
         working-directory: app
-        run: bunx tauri android build --apk
+        run: bunx tauri android build --target aarch64 --apk
 
       # --- Prüfen, ob Signierungs-Secret existiert ---
       - name: Check Keystore Secret
@@ -76,14 +76,21 @@ jobs:
         if: steps.check_keystore.outputs.is_signed == 'true'
         run: |
           BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/* | tail -n 1)
-          APK_PATH=$(find app/gen/android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          APK_PATH=$(find app -type f -name "*.apk" | head -n 1)
+          
+          if [ -z "$APK_PATH" ]; then
+            echo "Fehler: Keine APK-Datei im Ordner 'app' gefunden!"
+            exit 1
+          fi
+
+          echo "Gefundene APK: $APK_PATH"
           
           $BUILD_TOOLS_DIR/apksigner sign \
             --ks app/release.keystore \
             --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
             --key-pass pass:"${{ secrets.KEY_PASSWORD }}" \
             --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
-            --out app/app-release-signed.apk \
+            --out app/app-arm64-release-signed.apk \
             "$APK_PATH"
 
       # --- Artefakt hochladen ---
@@ -91,14 +98,12 @@ jobs:
         if: steps.check_keystore.outputs.is_signed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-signed
-          path: app/app-release-signed.apk
+          name: app-arm64-release-signed
+          path: app/app-arm64-release-signed.apk
 
       - name: Upload Unsigned APK (Fallback)
         if: steps.check_keystore.outputs.is_signed == 'false'
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-unsigned
-          path: |
-            app/**/gen/android/app/build/outputs/apk/universal/release/*.apk
-            app/**/gen/android/app/build/outputs/apk/arm64/release/*.apk
+          name: app-arm64-release-unsigned
+          path: app/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
